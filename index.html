@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spatial Logic - Mobil Telemetry Dashboard v1.0</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Állapotsor -->
+        <header class="app-header">
+            <span class="status-pill connected">PWA Connected</span>
+            <span class="imu-rate">20 Hz IMU Stream</span>
+            <span class="rec-indicator">● REC</span>
+        </header>
+
+        <!-- Hero Metric -->
+        <section class="hero-metric">
+            <h2 class="section-title">STABILITÁSI INDEX</h2>
+            <div class="metric-value" id="stability-value">87%</div>
+            <div class="metric-status" id="stability-status">STRATEGIST</div>
+            <div class="metric-trend" id="stability-trend">[ ↑ +3% vs. baseline ]</div>
+        </section>
+
+        <!-- Üzemmód / Locomotion State -->
+        <section class="mode-badge">
+            <div class="badge active" id="mode-static">STATIKUS MÓD (k = 0.5)</div>
+            <div class="badge inactive" id="mode-transit">TRANSIT / SÉTA</div>
+        </section>
+
+        <!-- 24 Órás Cognitive Pacing Canvas -->
+        <section class="chart-container">
+            <div class="chart-header">
+                <span>Real-time görbe vs. Adaptív Bázisvonal (24h)</span>
+            </div>
+            <canvas id="pacingCanvas"></canvas>
+        </section>
+
+        <!-- KPI Grid -->
+        <section class="kpi-grid">
+            <div class="kpi-card">
+                <span class="kpi-label">Flow Rendszeridő</span>
+                <span class="kpi-value" id="kpi-flow">64%</span>
+            </div>
+            <div class="kpi-card">
+                <span class="kpi-label">Regeneráció</span>
+                <span class="kpi-value" id="kpi-regen">42m</span>
+            </div>
+        </section>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
