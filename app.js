@@ -1,31 +1,52 @@
 /**
- * Spatial Telemetry App - Integrated with Spatial Logic v1.2.1 Core
- * Features: 72h Rolling Adaptive Baseline, Locomotion Gating (IMU + Gyro),
- * High-Pass Filtering, On-Device LocalStorage, Cognitive Interventions.
+ * Spatial Telemetry Micro App
+ * Version: v1.3.0 - Adaptive Baseline & Vagal Recovery Release
+ * 
+ * Changelog v1.3.0:
+ * - Implemented EMA Noise Suppression Filter (alpha = 0.15) for smooth UI stream.
+ * - Implemented Asymmetric Vagal Recovery Rate (instant drop, capped +1%/s recovery).
+ * - Implemented 5% State Hysteresis thresholds to eliminate UI flicker.
+ * - Integrated 72h On-Device Adaptive Target Baseline.
+ * - Explicit Semantic Versioning in code and UI metadata.
  */
 
+const APP_VERSION = "v1.3.0";
+
 const CONFIG = {
-    k: 0.5,                   // Normál érzékenységi szorzó (Deep work / statikus állapot)
-    locomotionK: 0.05,        // Csökkentett érzékenység mozgás (séta/futás) közben
-    locomotionThreshold: 5.0, // Gyorsulási variancia küszöb, ami felett a rendszer mozgást érzékel
+    // Érzékenység és Szűrők
+    k: 0.5,                   // Normál érzékenységi szorzó (Deep work / statikus)
+    locomotionK: 0.05,        // Csökkentett érzékenység mozgás közben
+    locomotionThreshold: 5.0, // Gyorsulási variancia küszöb mozgásérzékeléshez
     windowSize: 40,
     lowPassAlpha: 0.3,        // Aluláteresztő szűrő együtthatója
+
+    // v1.3.0 ÚJ: Simítás és Helyreállítási Paraméterek
+    emaAlpha: 0.15,           // Exponenciális simítási tényező (Zajcsökkentés)
+    maxRecoveryPerSec: 1.0,   // Max. regenerációs sebesség (+1.0% / mp)
+    sampleRateHz: 20,         // Telemetria mintavételi frekvencia (~20Hz)
+
+    // Adattárolás
     epochMs: 60000,           // 1 perces rögzítési ablakok
-    maxEpochs: 4320           // 3 nap (72 óra) puffer a látható mintázathoz
+    maxEpochs: 4320           // 3 nap (72 óra) rolling puffer
 };
 
-// Szenzor pufferek & szűrő állapotok
+// Internal State Registers
 let sensorData = { x: [], y: [], z: [], pitch: [], yaw: [], roll: [] };
 let lpfState = { x: 0, y: 0, z: 0 };
 
-let lastStability = 100;
+// v1.3.0 State Machine Variables
+let rawStability = 100;
+let smoothedStability = 100;
+let finalStability = 100;
+let currentState = "STRATEGIST";
 let isLocomotion = false;
 
-// UI DOM Hivatkozások
+// DOM Hivatkozások
 const valElem = document.getElementById('stability-value');
 const statusElem = document.getElementById('stability-status');
 const trendElem = document.getElementById('stability-trend');
 const baselineElem = document.getElementById('adaptive-baseline-label');
+const versionBadge = document.getElementById('app-version-badge');
 
 const interventionBanner = document.getElementById('intervention-banner');
 const interventionIcon = document.getElementById('intervention-icon');
@@ -37,9 +58,11 @@ const ctx = canvas ? canvas.getContext('2d') : null;
 const root = document.documentElement;
 
 // On-Device Történeti Adatok Beolvasása (Anonim 72h)
-let cognitiveHistory = JSON.parse(localStorage.getItem('sl_history') || '[]');
+let cognitiveHistory = JSON.parse(localStorage.getItem('sl_history_v130') || '[]');
 
-// 1. ÉSZZOR ADATOK FELDOLGOZÁSA (High-Pass + Gyro Fusion)
+// ---------------------------------------------------------------------
+// 1. SENSER DATA ACQUISITION & HIGH-PASS FILTERING
+// ---------------------------------------------------------------------
 function handleMotion(event) {
     let acc = event.accelerationIncludingGravity || event.acceleration;
     let rot = event.rotationRate;
@@ -49,17 +72,15 @@ function handleMotion(event) {
     let rawY = acc.y || 0;
     let rawZ = acc.z || 0;
 
-    // Aluláteresztő szűrő (Gravitáció és makro-mozgás leválasztása)
+    // High-pass szűrés (Mikro-rezgések megtartása, lejtő/gravitáció leválasztása)
     lpfState.x = CONFIG.lowPassAlpha * rawX + (1 - CONFIG.lowPassAlpha) * lpfState.x;
     lpfState.y = CONFIG.lowPassAlpha * rawY + (1 - CONFIG.lowPassAlpha) * lpfState.y;
     lpfState.z = CONFIG.lowPassAlpha * rawZ + (1 - CONFIG.lowPassAlpha) * lpfState.z;
 
-    // High-Pass szűrt adatok (mikro-rezgések megtartása)
     sensorData.x.push(rawX - lpfState.x);
     sensorData.y.push(rawY - lpfState.y);
     sensorData.z.push(rawZ - lpfState.z);
 
-    // Giroszkóp adatok (Fejtartás mozgás közben)
     sensorData.pitch.push(rot ? (rot.alpha || 0) : 0);
     sensorData.yaw.push(rot ? (rot.beta || 0) : 0);
     sensorData.roll.push(rot ? (rot.gamma || 0) : 0);
@@ -67,12 +88,14 @@ function handleMotion(event) {
     if (sensorData.x.length > CONFIG.windowSize) {
         sensorData.x.shift(); sensorData.y.shift(); sensorData.z.shift();
         sensorData.pitch.shift(); sensorData.yaw.shift(); sensorData.roll.shift();
-        calculateRealTimeStability();
+        calculateStabilityPipeline();
     }
 }
 
-// 2. VALÓS IDEJŰ STABILITÁS ÉS LOCOMOTION GATING
-function calculateRealTimeStability() {
+// ---------------------------------------------------------------------
+// 2. v1.3.0 CORE PIPELINE: SIMÍTÁS, ASZIMMETRIKUS RECOVERY ÉS HISZTERÉZIS
+// ---------------------------------------------------------------------
+function calculateStabilityPipeline() {
     const getVar = (arr) => {
         const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
         return arr.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / arr.length;
@@ -81,33 +104,65 @@ function calculateRealTimeStability() {
     const accVar = getVar(sensorData.x) + getVar(sensorData.y) + getVar(sensorData.z);
     const gyroVar = getVar(sensorData.pitch) + getVar(sensorData.yaw) + getVar(sensorData.roll);
 
-    // Detektáljuk, hogy a felhasználó halad-e (séta/futás)
+    // Locomotion Gating
     isLocomotion = accVar > CONFIG.locomotionThreshold;
 
-    let targetMetric;
-    let activeK;
+    let targetMetric = isLocomotion ? (Math.sqrt(gyroVar) * 0.5) : Math.sqrt(accVar);
+    let activeK = isLocomotion ? CONFIG.locomotionK : CONFIG.k;
 
-    if (isLocomotion) {
-        targetMetric = Math.sqrt(gyroVar) * 0.5;
-        activeK = CONFIG.locomotionK;
+    // Step A: Nyers Exponenciális Terhelési Érték
+    rawStability = Math.max(0, Math.min(100, Math.round(100 * Math.exp(-activeK * targetMetric))));
+
+    // Step B: Exponenciális Simítás (EMA - Noise Suppression)
+    smoothedStability = (CONFIG.emaAlpha * rawStability) + ((1 - CONFIG.emaAlpha) * smoothedStability);
+
+    // Step C: Aszimmetrikus Fiziológiai Helyreállítás (Vagal Recovery Constraint)
+    const maxRecoveryPerSample = CONFIG.maxRecoveryPerSec / CONFIG.sampleRateHz;
+
+    if (smoothedStability < finalStability) {
+        // Terhelés esés: Azonnali és meredek reakció engedélyezve
+        finalStability = smoothedStability;
     } else {
-        targetMetric = Math.sqrt(accVar);
-        activeK = CONFIG.k;
+        // Regeneráció: Korlátozott paraszimpatikus helyreállítási meredekség
+        finalStability = Math.min(smoothedStability, finalStability + maxRecoveryPerSample);
     }
 
-    // Exponenciális stabilitási érték
-    lastStability = Math.max(0, Math.min(100, Math.round(100 * Math.exp(-activeK * targetMetric))));
+    // Step D: Zóna Értékelés Hiszterézissel
+    evaluateStateWithHysteresis(finalStability);
+
     updateUI();
 }
 
-// 3. ADAPTÍV BASELINE (AZONOS ÓRÁS HISTORIKUS CÉLÉRTÉK)
+// ---------------------------------------------------------------------
+// 3. ZÓNAVÁLTÁSI HISZTERÉZIS LOGIKA (5% BUFFER)
+// ---------------------------------------------------------------------
+function evaluateStateWithHysteresis(val) {
+    if (isLocomotion && val > 40) {
+        currentState = "TRANSIT (BUFFER)";
+        return;
+    }
+
+    if (currentState === "STRATEGIST") {
+        if (val <= 78) currentState = "RESET";
+    } else if (currentState === "RESET") {
+        if (val >= 83) currentState = "STRATEGIST"; // +5% hiszterézis küszöb
+        else if (val <= 38) currentState = "COLLAPSE";
+    } else if (currentState === "COLLAPSE") {
+        if (val >= 43) currentState = "RESET";      // +5% hiszterézis küszöb
+    } else {
+        currentState = val > 80 ? "STRATEGIST" : (val > 40 ? "RESET" : "COLLAPSE");
+    }
+}
+
+// ---------------------------------------------------------------------
+// 4. ADAPTÍV 72H BASELINE (AZONOS ÓRÁS CÉLÉRTÉK)
+// ---------------------------------------------------------------------
 function getAdaptiveTargetBaseline() {
     if (cognitiveHistory.length === 0) return 82;
 
     const now = Date.now();
     const currentHour = new Date(now).getHours();
 
-    // Szűrés az elmúlt napok azonos óráira
     let historicalPoints = cognitiveHistory.filter(p => 
         new Date(p.t).getHours() === currentHour && p.t < (now - 86400000)
     );
@@ -116,63 +171,57 @@ function getAdaptiveTargetBaseline() {
         let sum = historicalPoints.reduce((acc, p) => acc + p.s, 0);
         return Math.round(sum / historicalPoints.length);
     } else {
-        // Cirkadián fallback szinusz-modell
         return Math.round(65 + 20 * Math.sin((currentHour - 8) * Math.PI / 12));
     }
 }
 
-// 4. UI ÉS INTERVENCIÓ FRISSÍTÉS
+// ---------------------------------------------------------------------
+// 5. UI ÉS HUD FRISSÍTÉS
+// ---------------------------------------------------------------------
 function updateUI() {
+    const displayVal = Math.round(finalStability);
     const baseline = getAdaptiveTargetBaseline();
 
-    if (valElem) valElem.textContent = `${lastStability}%`;
-    if (baselineElem) baselineElem.textContent = `72h Adaptive: ${baseline}%`;
+    if (valElem) valElem.textContent = `${displayVal}%`;
+    if (baselineElem) baselineElem.textContent = `72h Adaptive Baseline: ${baseline}%`;
+    if (versionBadge) versionBadge.textContent = APP_VERSION;
 
-    let activeColor = '#00E676';
-    let statusText = 'STRATEGIST';
+    let activeColor = '#00E676'; // STRATEGIST (Zöld)
 
-    if (isLocomotion && lastStability > 40) {
-        statusText = 'TRANSIT (BUFFER)';
-        activeColor = '#FFD740';
-    } else if (lastStability > 80) {
-        statusText = 'STRATEGIST';
-        activeColor = '#00E676';
-    } else if (lastStability > 40) {
-        statusText = 'RESET';
-        activeColor = '#FFD740';
-    } else {
-        statusText = 'COLLAPSE';
-        activeColor = '#FF5252';
+    if (currentState === 'TRANSIT (BUFFER)' || currentState === 'RESET') {
+        activeColor = '#FFD740'; // RESET/TRANSIT (Sárga)
+    } else if (currentState === 'COLLAPSE') {
+        activeColor = '#FF5252'; // COLLAPSE (Piros)
     }
 
     root.style.setProperty('--active-color', activeColor);
-    if (statusElem) statusElem.textContent = statusText;
+    if (statusElem) statusElem.textContent = currentState;
 
     if (trendElem) {
-        const diff = lastStability - baseline;
+        const diff = displayVal - baseline;
         const sign = diff >= 0 ? '↑ +' : '↓ ';
         trendElem.textContent = `[ ${sign}${diff}% vs. baseline ]`;
         trendElem.style.color = activeColor;
     }
 
-    updateInterventionBanner(statusText);
+    updateInterventionBanner(currentState);
     drawChart(activeColor, baseline);
 }
 
-function updateInterventionBanner(stateText) {
+function updateInterventionBanner(state) {
     if (!interventionBanner) return;
 
-    if (stateText === 'STRATEGIST') {
+    if (state === 'STRATEGIST') {
         interventionIcon.textContent = '🌿';
         interventionTitle.textContent = 'Kognitív Egyensúly Optimális';
         interventionDesc.textContent = 'Stabil fókuszállapot. Az AI szemüveg észrevétlenül támogatja a munkádat.';
         interventionBanner.style.borderColor = 'rgba(0, 230, 118, 0.2)';
-    } else if (stateText === 'TRANSIT (BUFFER)') {
+    } else if (state === 'TRANSIT (BUFFER)') {
         interventionIcon.textContent = '🚶';
         interventionTitle.textContent = 'Helyváltoztatás Észlelve';
         interventionDesc.textContent = 'Mozgás közben az alacsonyabb érzékenységű fejtartási telemetria aktív.';
         interventionBanner.style.borderColor = 'rgba(255, 215, 64, 0.3)';
-    } else if (stateText === 'RESET') {
+    } else if (state === 'RESET') {
         interventionIcon.textContent = '🧘';
         interventionTitle.textContent = 'Finom Intervenció Szükséges';
         interventionDesc.textContent = 'Pislants mélyeket, emeld fel a tekinteted, és tarts 20 másodperc mentális szünetet.';
@@ -185,28 +234,22 @@ function updateInterventionBanner(stateText) {
     }
 }
 
-// 5. RÖGZÍTÉS PERCENKÉNT (72h Puffer)
+// ---------------------------------------------------------------------
+// 6. RÖGZÍTÉS PERCENKÉNT ÉS CANVAS VIZUALIZÁCIÓ
+// ---------------------------------------------------------------------
 function recordEpoch() {
-    cognitiveHistory.push({ t: Date.now(), s: lastStability });
+    cognitiveHistory.push({ t: Date.now(), s: Math.round(finalStability) });
     if (cognitiveHistory.length > CONFIG.maxEpochs) cognitiveHistory.shift();
-    localStorage.setItem('sl_history', JSON.stringify(cognitiveHistory));
+    localStorage.setItem('sl_history_v130', JSON.stringify(cognitiveHistory));
 }
 
-// 6. CANVAS GRAFIKON KIRAJZOLÁSA
 function drawChart(activeColor, baseline) {
     if (!canvas || !ctx) return;
     const width = canvas.width;
     const height = canvas.height;
     ctx.clearRect(0, 0, width, height);
 
-    // Háló
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-    ctx.lineWidth = 1;
-    [0.3, 0.6, 0.9].forEach(r => {
-        ctx.beginPath(); ctx.moveTo(0, height * r); ctx.lineTo(width, height * r); ctx.stroke();
-    });
-
-    // Adaptív Baseline Vonal
+    // Baseline szaggatott vonal
     const baselineY = height - (baseline / 100 * height);
     ctx.beginPath();
     ctx.setLineDash([4, 4]);
@@ -217,37 +260,18 @@ function drawChart(activeColor, baseline) {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Történeti adatok kirajzolása (utolsó 30 pont)
+    // Történeti adatok kirajzolása
     const displayPoints = cognitiveHistory.slice(-30).map(p => p.s);
-    if (displayPoints.length === 0) displayPoints.push(lastStability);
+    if (displayPoints.length === 0) displayPoints.push(Math.round(finalStability));
 
     const step = width / Math.max(1, displayPoints.length - 1);
 
-    // Area Fill
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, activeColor === '#00E676' ? 'rgba(0, 230, 118, 0.22)' : (activeColor === '#FFD740' ? 'rgba(255, 215, 64, 0.22)' : 'rgba(255, 82, 82, 0.22)'));
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
-
-    ctx.beginPath();
-    displayPoints.forEach((val, idx) => {
-        const x = idx * step;
-        const y = height - (val / 100 * height);
-        if (idx === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-    });
-    ctx.lineTo(width, height);
-    ctx.lineTo(0, height);
-    ctx.closePath();
-    ctx.fillStyle = gradient;
-    ctx.fill();
-
-    // Neon Vonallánc
     ctx.save();
     ctx.beginPath();
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 2.5;
     ctx.strokeStyle = activeColor;
     ctx.shadowColor = activeColor;
-    ctx.shadowBlur = 10;
+    ctx.shadowBlur = 8;
     displayPoints.forEach((val, idx) => {
         const x = idx * step;
         const y = height - (val / 100 * height);
@@ -274,23 +298,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     setInterval(recordEpoch, CONFIG.epochMs);
-
-    // Gombok kezelése
-    document.getElementById('btn-recalibrate')?.addEventListener('click', () => {
-        localStorage.removeItem('sl_history');
-        cognitiveHistory = [];
-        alert('72h Adaptív Baseline előzmények törölve. A rendszer újraindul.');
-        updateUI();
-    });
-
-    document.getElementById('btn-privacy')?.addEventListener('click', () => {
-        alert('100% On-Device Architektúra: A 72h adaptív előzmények és az IMU adatok kizárólag a helyi böngésző/alkalmazás tárolójában futnak.');
-    });
-
-    document.getElementById('btn-education')?.addEventListener('click', () => {
-        alert('Kognitív Egyensúly: Az AI szemüvegek mentális túlterhelésének megelőzésére. TRANSIT állapotban a mozgási zaj kiszűrésre kerül.');
-    });
-
     updateUI();
 });
     
