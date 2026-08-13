@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const valElem = document.getElementById('stability-value');
     const statusElem = document.getElementById('stability-status');
     const trendElem = document.getElementById('stability-trend');
+    const root = document.documentElement;
 
     let dataPoints = Array(30).fill(82);
     const baseline = 82;
@@ -20,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // Kijelző nélküli AI Szemüveg Telemetriás Adatfolyam (IMU Proxy)
+    // IMU Telemetria figyelése
     if (window.DeviceMotionEvent) {
         window.addEventListener('devicemotion', (event) => {
             const acc = event.accelerationIncludingGravity || event.acceleration;
@@ -33,20 +34,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }, true);
     }
 
-    // 1 Hz-es Élettani Szimulációs és Android XR Canvas Render Ciklus
+    // 1 Hz-es Élettani Szimuláció & Canvas Render
     setInterval(() => {
         const motionDelta = Math.abs(currentMotionMagnitude - 9.81);
         const isMoving = currentMotionMagnitude > 0.1 && motionDelta > 2.0;
 
         if (isMoving) {
-            // Szimpatikus Terhelés (Degradáció)
             const stressFactor = Math.min(motionDelta * 2.8, 18);
             currentVal = Math.max(30, currentVal - stressFactor);
         } else {
-            // Paraszimpatikus Vagális Regeneráció (Exponenciális Helyreállás k = 0.22)
-            const recoveryRate = 0.22;
+            const recoveryRate = 0.22; // Vagális helyreállítási konstans
             const microHRVNoise = (Math.random() - 0.5) * 1.2;
-            
             currentVal = currentVal + recoveryRate * (baseline - currentVal) + microHRVNoise;
             currentVal = Math.min(100, Math.max(30, currentVal));
         }
@@ -55,67 +53,100 @@ document.addEventListener('DOMContentLoaded', () => {
         dataPoints.push(displayVal);
         if (dataPoints.length > 30) dataPoints.shift();
 
-        // M3 Spatial UI elemek frissítése
+        // Értékek frissítése
         if (valElem) valElem.textContent = `${displayVal}%`;
 
-        if (statusElem && valElem && trendElem) {
-            if (displayVal >= 80) {
-                valElem.style.color = '#00E676';
-                statusElem.textContent = 'STRATEGIST';
-                trendElem.style.color = '#00E676';
-            } else if (displayVal >= 60) {
-                valElem.style.color = '#FFD740';
-                statusElem.textContent = 'RESET';
-                trendElem.style.color = '#FFD740';
-            } else {
-                valElem.style.color = '#FF5252';
-                statusElem.textContent = 'COLLAPSE';
-                trendElem.style.color = '#FF5252';
-            }
+        let activeColor = '#00E676';
+        let statusText = 'STRATEGIST';
 
+        if (displayVal >= 80) {
+            activeColor = '#00E676'; // Zöld
+            statusText = 'STRATEGIST';
+        } else if (displayVal >= 60) {
+            activeColor = '#FFD740'; // Sárga
+            statusText = 'RESET';
+        } else {
+            activeColor = '#FF5252'; // Piros
+            statusText = 'COLLAPSE';
+        }
+
+        root.style.setProperty('--active-color', activeColor);
+        if (statusElem) statusElem.textContent = statusText;
+
+        if (trendElem) {
             const diff = displayVal - baseline;
             const sign = diff >= 0 ? '↑ +' : '↓ ';
             trendElem.textContent = `[ ${sign}${diff}% vs. baseline ]`;
+            trendElem.style.color = activeColor;
         }
 
-        drawChart();
+        drawChart(activeColor);
     }, 1000);
 
-    function drawChart() {
+    function drawChart(activeColor) {
         if (!canvas || !ctx) return;
         const width = canvas.width;
         const height = canvas.height;
         ctx.clearRect(0, 0, width, height);
 
-        // Grid lines (M3 Glass Grid)
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        // 1. Vízszintes hálónégyzetek (Glass Grid)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
         ctx.lineWidth = 1;
-        [0.25, 0.5, 0.75].forEach(ratio => {
+        [0.3, 0.6, 0.9].forEach(ratio => {
             ctx.beginPath();
             ctx.moveTo(0, height * ratio);
             ctx.lineTo(width, height * ratio);
             ctx.stroke();
         });
 
-        // Adaptive Baseline (Szaggatott sárga vonal)
-        ctx.beginPath();
-        ctx.setLineDash([6, 6]);
-        ctx.strokeStyle = '#FFD740';
-        ctx.lineWidth = 1.5;
+        // 2. Baseline vonal (Szaggatott)
         const baselineY = height - (baseline / 100 * height);
+        ctx.beginPath();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = 'rgba(255, 215, 64, 0.4)';
+        ctx.lineWidth = 1.5;
         ctx.moveTo(0, baselineY);
         ctx.lineTo(width, baselineY);
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Valós idejű telemetriás hullámvonal
+        // 3. Kitöltött színátmenet a vonal alatt (Area Fill)
+        const step = width / (dataPoints.length - 1);
+        const gradient = ctx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, activeColor.replace(')', ', 0.25)').replace('rgb', 'rgba').replace('#', 'rgba(')); 
+        // Hex to RGBA konverziós szimuláció a finom degradéhoz:
+        if (activeColor === '#00E676') {
+            gradient.addColorStop(0, 'rgba(0, 230, 118, 0.25)');
+            gradient.addColorStop(1, 'rgba(0, 230, 118, 0.0)');
+        } else if (activeColor === '#FFD740') {
+            gradient.addColorStop(0, 'rgba(255, 215, 64, 0.25)');
+            gradient.addColorStop(1, 'rgba(255, 215, 64, 0.0)');
+        } else {
+            gradient.addColorStop(0, 'rgba(255, 82, 82, 0.25)');
+            gradient.addColorStop(1, 'rgba(255, 82, 82, 0.0)');
+        }
+
+        ctx.beginPath();
+        dataPoints.forEach((val, idx) => {
+            const x = idx * step;
+            const y = height - (val / 100 * height);
+            if (idx === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.lineTo(width, height);
+        ctx.lineTo(0, height);
+        ctx.closePath();
+        ctx.fillStyle = gradient;
+        ctx.fill();
+
+        // 4. Izzó Neon Hullámvonal (Glow Line)
+        ctx.save();
         ctx.beginPath();
         ctx.lineWidth = 3;
-        const lastVal = dataPoints[dataPoints.length - 1];
-        const activeColor = lastVal >= 80 ? '#00E676' : (lastVal >= 60 ? '#FFD740' : '#FF5252');
         ctx.strokeStyle = activeColor;
+        ctx.shadowColor = activeColor;
+        ctx.shadowBlur = 12;
 
-        const step = width / (dataPoints.length - 1);
         dataPoints.forEach((val, idx) => {
             const x = idx * step;
             const y = height - (val / 100 * height);
@@ -123,9 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else ctx.lineTo(x, y);
         });
         ctx.stroke();
-
-        // Android XR Glow Effect a görbe alatt
-        ctx.shadowColor = activeColor;
-        ctx.shadowBlur = 12;
+        ctx.restore();
     }
 });
+    
