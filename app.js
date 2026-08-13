@@ -1,9 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('pacingCanvas');
-    const ctx = canvas.getContext('2d');
-
-    const modal = document.getElementById('sensor-permission-modal');
-    const enableBtn = document.getElementById('enable-sensors-btn');
+    const ctx = canvas ? canvas.getContext('2d') : null;
 
     const valElem = document.getElementById('stability-value');
     const statusElem = document.getElementById('stability-status');
@@ -24,43 +21,20 @@ document.addEventListener('DOMContentLoaded', () => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // Force close modal on click & trigger sensor request
-    enableBtn.addEventListener('click', () => {
-        // Guarantee modal disappears immediately
-        modal.classList.add('hidden');
-
-        // Request permission for iOS 13+ devices
-        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-            DeviceMotionEvent.requestPermission()
-                .then(response => {
-                    if (response === 'granted') {
-                        startSensorStream();
-                    }
-                })
-                .catch(err => {
-                    console.log('Sensor permission error:', err);
-                });
-        } else {
-            // Android / Standard Browsers
-            startSensorStream();
-        }
-    });
-
-    function startSensorStream() {
-        if ('DeviceMotionEvent' in window) {
-            window.addEventListener('devicemotion', (event) => {
-                const acc = event.accelerationIncludingGravity || event.acceleration;
-                if (acc) {
-                    const x = acc.x || 0;
-                    const y = acc.y || 0;
-                    const z = acc.z || 0;
-                    currentMotionMagnitude = Math.sqrt(x * x + y * y + z * z);
-                }
-            });
-        }
+    // Auto-start motion sensors if available
+    if ('DeviceMotionEvent' in window) {
+        window.addEventListener('devicemotion', (event) => {
+            const acc = event.accelerationIncludingGravity || event.acceleration;
+            if (acc) {
+                const x = acc.x || 0;
+                const y = acc.y || 0;
+                const z = acc.z || 0;
+                currentMotionMagnitude = Math.sqrt(x * x + y * y + z * z);
+            }
+        });
     }
 
-    // Processing & UI Update Loop
+    // Immediate Processing & UI Loop
     setInterval(() => {
         let delta = 0;
         if (currentMotionMagnitude > 0) {
@@ -75,7 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 modeTransit.className = 'badge inactive';
             }
         } else {
-            // Fallback simulation mode
+            // Fallback immediate simulation
             delta = (Math.random() - 0.48) * 6;
         }
 
@@ -86,31 +60,33 @@ document.addEventListener('DOMContentLoaded', () => {
         if (dataPoints.length > 30) dataPoints.shift();
 
         // Update UI Text
-        valElem.textContent = `${currentVal}%`;
+        if (valElem) valElem.textContent = `${currentVal}%`;
 
-        if (currentVal >= 80) {
-            valElem.style.color = '#00E676';
-            statusElem.textContent = 'STRATEGIST';
-            trendElem.style.color = '#00E676';
-        } else if (currentVal >= 60) {
-            valElem.style.color = '#FFD740';
-            statusElem.textContent = 'RESET';
-            trendElem.style.color = '#FFD740';
-        } else {
-            valElem.style.color = '#FF5252';
-            statusElem.textContent = 'COLLAPSE';
-            trendElem.style.color = '#FF5252';
+        if (statusElem && valElem && trendElem) {
+            if (currentVal >= 80) {
+                valElem.style.color = '#00E676';
+                statusElem.textContent = 'STRATEGIST';
+                trendElem.style.color = '#00E676';
+            } else if (currentVal >= 60) {
+                valElem.style.color = '#FFD740';
+                statusElem.textContent = 'RESET';
+                trendElem.style.color = '#FFD740';
+            } else {
+                valElem.style.color = '#FF5252';
+                statusElem.textContent = 'COLLAPSE';
+                trendElem.style.color = '#FF5252';
+            }
+
+            const diff = currentVal - baseline;
+            const sign = diff >= 0 ? '↑ +' : '↓ ';
+            trendElem.textContent = `[ ${sign}${diff}% vs. baseline ]`;
         }
-
-        const diff = currentVal - baseline;
-        const sign = diff >= 0 ? '↑ +' : '↓ ';
-        trendElem.textContent = `[ ${sign}${diff}% vs. baseline ]`;
 
         drawChart();
     }, 1000);
 
     function drawChart() {
-        if (!canvas) return;
+        if (!canvas || !ctx) return;
         const width = canvas.width;
         const height = canvas.height;
         ctx.clearRect(0, 0, width, height);
@@ -152,4 +128,4 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.stroke();
     }
 });
-                          
+            
