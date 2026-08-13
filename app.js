@@ -8,8 +8,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const modeStatic = document.getElementById('mode-static');
     const modeTransit = document.getElementById('mode-transit');
 
-    let dataPoints = Array(30).fill(85);
+    let dataPoints = Array(30).fill(82);
     const baseline = 82;
+    let currentVal = 82.0; // Folytonos állapotváltozó a pontos exponenciális számításhoz
     let currentMotionMagnitude = 0;
 
     function resizeCanvas() {
@@ -21,8 +22,8 @@ document.addEventListener('DOMContentLoaded', () => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // Auto-start motion sensors if available
-    if ('DeviceMotionEvent' in window) {
+    // Azonnali szenzoros adatfolyam fogadása
+    if (window.DeviceMotionEvent) {
         window.addEventListener('devicemotion', (event) => {
             const acc = event.accelerationIncludingGravity || event.acceleration;
             if (acc) {
@@ -31,43 +32,48 @@ document.addEventListener('DOMContentLoaded', () => {
                 const z = acc.z || 0;
                 currentMotionMagnitude = Math.sqrt(x * x + y * y + z * z);
             }
-        });
+        }, true);
     }
 
-    // Immediate Processing & UI Loop
+    // 1 Hz-es Élettani Szimulációs & Megjelenítési Ciklus
     setInterval(() => {
-        let delta = 0;
-        if (currentMotionMagnitude > 0) {
-            const motionDelta = Math.abs(currentMotionMagnitude - 9.81);
-            delta = (Math.random() - 0.5) * 4 - (motionDelta * 2);
+        const motionDelta = Math.abs(currentMotionMagnitude - 9.81);
+        const isMoving = currentMotionMagnitude > 0.1 && motionDelta > 2.0;
 
-            if (motionDelta > 3.0) {
-                modeStatic.className = 'badge inactive';
-                modeTransit.className = 'badge active';
-            } else {
-                modeStatic.className = 'badge active';
-                modeTransit.className = 'badge inactive';
-            }
+        if (isMoving) {
+            // Szimpatikus túlterhelés (Degradáció)
+            // A rázás mértékével arányos hirtelen stabilitásvesztés
+            const stressFactor = Math.min(motionDelta * 2.8, 18);
+            currentVal = Math.max(30, currentVal - stressFactor);
+
+            if (modeStatic) modeStatic.className = 'badge inactive';
+            if (modeTransit) modeTransit.className = 'badge active';
         } else {
-            // Fallback immediate simulation
-            delta = (Math.random() - 0.48) * 6;
+            // Paraszimpatikus vagális regeneráció (Exponenciális Helyreállás)
+            // Gyors kezdeti emelkedés, aszimptotikus lassulás a bázisig
+            const recoveryRate = 0.22; 
+            const microHRVNoise = (Math.random() - 0.5) * 1.2; // Biológiai zaj
+            
+            currentVal = currentVal + recoveryRate * (baseline - currentVal) + microHRVNoise;
+            currentVal = Math.min(100, Math.max(30, currentVal));
+
+            if (modeStatic) modeStatic.className = 'badge active';
+            if (modeTransit) modeTransit.className = 'badge inactive';
         }
 
-        let lastVal = dataPoints[dataPoints.length - 1];
-        let currentVal = Math.min(100, Math.max(30, Math.round(lastVal + delta)));
-
-        dataPoints.push(currentVal);
+        const displayVal = Math.round(currentVal);
+        dataPoints.push(displayVal);
         if (dataPoints.length > 30) dataPoints.shift();
 
-        // Update UI Text
-        if (valElem) valElem.textContent = `${currentVal}%`;
+        // Műszerfal szöveges elemeinek frissítése
+        if (valElem) valElem.textContent = `${displayVal}%`;
 
         if (statusElem && valElem && trendElem) {
-            if (currentVal >= 80) {
+            if (displayVal >= 80) {
                 valElem.style.color = '#00E676';
                 statusElem.textContent = 'STRATEGIST';
                 trendElem.style.color = '#00E676';
-            } else if (currentVal >= 60) {
+            } else if (displayVal >= 60) {
                 valElem.style.color = '#FFD740';
                 statusElem.textContent = 'RESET';
                 trendElem.style.color = '#FFD740';
@@ -77,7 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 trendElem.style.color = '#FF5252';
             }
 
-            const diff = currentVal - baseline;
+            const diff = displayVal - baseline;
             const sign = diff >= 0 ? '↑ +' : '↓ ';
             trendElem.textContent = `[ ${sign}${diff}% vs. baseline ]`;
         }
@@ -91,7 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const height = canvas.height;
         ctx.clearRect(0, 0, width, height);
 
-        // Grid Lines
+        // Hálóvonalak
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
         ctx.lineWidth = 1;
         [0.25, 0.5, 0.75].forEach(ratio => {
@@ -101,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.stroke();
         });
 
-        // Adaptive Baseline
+        // Bázisvonal (Adaptive Baseline)
         ctx.beginPath();
         ctx.setLineDash([4, 4]);
         ctx.strokeStyle = '#FFD740';
@@ -112,11 +118,11 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Real-time Curve
+        // Valós idejű telemetriás görbe
         ctx.beginPath();
         ctx.lineWidth = 3;
-        const currentVal = dataPoints[dataPoints.length - 1];
-        ctx.strokeStyle = currentVal >= 80 ? '#00E676' : (currentVal >= 60 ? '#FFD740' : '#FF5252');
+        const lastVal = dataPoints[dataPoints.length - 1];
+        ctx.strokeStyle = lastVal >= 80 ? '#00E676' : (lastVal >= 60 ? '#FFD740' : '#FF5252');
 
         const step = width / (dataPoints.length - 1);
         dataPoints.forEach((val, idx) => {
@@ -128,4 +134,3 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.stroke();
     }
 });
-            
