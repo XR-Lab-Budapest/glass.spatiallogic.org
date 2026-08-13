@@ -1,55 +1,81 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="hu">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spatial Logic - Mobile Telemetry Dashboard v1.0</title>
+    <title>Android XR Spatial Telemetry</title>
+    <!-- Roboto Flex az Android XR tipográfiai előírásoknak megfelelően -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Header Status Bar -->
-        <header class="app-header">
-            <span class="status-pill connected" id="pwa-status">PWA Connected</span>
-            <span class="imu-rate" id="imu-rate">20 Hz Phone IMU</span>
-            <span class="rec-indicator">● REC</span>
+    <!-- Main Android XR Spatial Panel Window -->
+    <div class="xr-spatial-panel">
+        
+        <!-- Spatial Header Bar -->
+        <header class="xr-header">
+            <div class="xr-status-pill">
+                <span class="xr-status-dot"></span>
+                <span id="xr-device-label">AI GLASSES IMU (20 Hz)</span>
+            </div>
+            
+            <div class="xr-system-indicators">
+                <span class="xr-badge">BLE CONNECTED</span>
+                <span class="xr-badge">GLASSES BATT: 85%</span>
+            </div>
         </header>
 
-        <!-- Hero Metric -->
-        <section class="hero-metric">
-            <h2 class="section-title">STABILITY INDEX</h2>
-            <div class="metric-value" id="stability-value">87%</div>
-            <div class="metric-status" id="stability-status">STRATEGIST</div>
-            <div class="metric-trend" id="stability-trend">[ ↑ +3% vs. baseline ]</div>
-        </section>
+        <!-- Main Content Grid -->
+        <main class="xr-grid">
+            
+            <!-- Left Column: Primary Telemetry Focus Card -->
+            <section class="xr-card xr-primary-card">
+                <div class="xr-card-content">
+                    <span class="xr-label">STABILITY INDEX</span>
+                    <h1 id="stability-value">81%</h1>
+                    <div id="stability-status" class="xr-status-title">STRATEGIST</div>
+                    <div id="stability-trend" class="xr-trend-tag">[ ↓ -1% vs. baseline ]</div>
+                </div>
+            </section>
 
-        <!-- Locomotion State -->
-        <section class="mode-badge">
-            <div class="badge active" id="mode-static">STATIC MODE (k = 0.5)</div>
-            <div class="badge inactive" id="mode-transit">TRANSIT / WALK</div>
-        </section>
+            <!-- Right Column: Real-Time Spatial Waveform Canvas -->
+            <section class="xr-card xr-canvas-card">
+                <div class="xr-card-header">
+                    <span class="xr-label">Glasses Live Telemetry (30s Window)</span>
+                </div>
+                <div class="xr-canvas-wrapper">
+                    <canvas id="pacingCanvas"></canvas>
+                </div>
+            </section>
+            
+        </main>
 
-        <!-- 24-Hour Cognitive Pacing Canvas -->
-        <section class="chart-container">
-            <div class="chart-header">
-                <span>Real-time curve vs. Adaptive Baseline (24h)</span>
-            </div>
-            <canvas id="pacingCanvas"></canvas>
-        </section>
+        <!-- Floating Spatial Action Toolbar -->
+        <footer class="xr-floating-toolbar">
+            <button class="xr-icon-btn" title="Recalibrate Baseline">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+                </svg>
+            </button>
+            <div class="xr-toolbar-divider"></div>
+            <button class="xr-icon-btn" title="Export Telemetry Log">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                </svg>
+            </button>
+            <div class="xr-toolbar-divider"></div>
+            <button class="xr-icon-btn" title="Dock to Physical Desk">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M4 15h16v-2H4v2zm0 4h16v-2H4v2zm0-8h16V9H4v2zm0-6v2h16V5H4z"/>
+                </svg>
+            </button>
+        </footer>
 
-        <!-- KPI Grid -->
-        <section class="kpi-grid">
-            <div class="kpi-card">
-                <span class="kpi-label">Flow System Time</span>
-                <span class="kpi-value" id="kpi-flow">64%</span>
-            </div>
-            <div class="kpi-card">
-                <span class="kpi-label">Recovery Time</span>
-                <span class="kpi-value" id="kpi-regen">42m</span>
-            </div>
-        </section>
     </div>
 
     <script src="app.js"></script>
 </body>
-</html>
+                    </html>
+                    
