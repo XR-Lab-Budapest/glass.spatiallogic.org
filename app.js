@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentMotionMagnitude = 0;
 
     function resizeCanvas() {
+        if (!canvas) return;
         const rect = canvas.getBoundingClientRect();
         canvas.width = rect.width;
         canvas.height = 200;
@@ -23,54 +24,46 @@ document.addEventListener('DOMContentLoaded', () => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // Sensor Access Handling
-    function initSensors() {
-        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-            DeviceMotionEvent.requestPermission().then(response => {
-                if (response === 'granted') {
-                    startSensorStream();
-                } else {
-                    alert('Sensor permission denied. Using simulated stream.');
-                }
-                modal.classList.add('hidden');
-            }).catch(() => {
-                modal.classList.add('hidden');
-            });
-        } else if ('DeviceMotionEvent' in window) {
-            startSensorStream();
-            modal.classList.add('hidden');
-        } else {
-            modal.classList.add('hidden');
-        }
-    }
-
-    enableBtn.addEventListener('click', initSensors);
-
-    // Automatically hide modal if no explicit permission dialog is needed
-    if (typeof DeviceMotionEvent === 'undefined' || typeof DeviceMotionEvent.requestPermission !== 'function') {
+    // Force close modal on click & trigger sensor request
+    enableBtn.addEventListener('click', () => {
+        // Guarantee modal disappears immediately
         modal.classList.add('hidden');
-        if ('DeviceMotionEvent' in window) {
+
+        // Request permission for iOS 13+ devices
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+            DeviceMotionEvent.requestPermission()
+                .then(response => {
+                    if (response === 'granted') {
+                        startSensorStream();
+                    }
+                })
+                .catch(err => {
+                    console.log('Sensor permission error:', err);
+                });
+        } else {
+            // Android / Standard Browsers
             startSensorStream();
         }
-    }
+    });
 
     function startSensorStream() {
-        window.addEventListener('devicemotion', (event) => {
-            const acc = event.accelerationIncludingGravity || event.acceleration;
-            if (acc) {
-                const x = acc.x || 0;
-                const y = acc.y || 0;
-                const z = acc.z || 0;
-                currentMotionMagnitude = Math.sqrt(x * x + y * y + z * z);
-            }
-        });
+        if ('DeviceMotionEvent' in window) {
+            window.addEventListener('devicemotion', (event) => {
+                const acc = event.accelerationIncludingGravity || event.acceleration;
+                if (acc) {
+                    const x = acc.x || 0;
+                    const y = acc.y || 0;
+                    const z = acc.z || 0;
+                    currentMotionMagnitude = Math.sqrt(x * x + y * y + z * z);
+                }
+            });
+        }
     }
 
-    // Processing & UI Update Loop (20Hz internal calculation, 1s UI render)
+    // Processing & UI Update Loop
     setInterval(() => {
         let delta = 0;
         if (currentMotionMagnitude > 0) {
-            // Calculate stability variance based on smartphone accelerometer
             const motionDelta = Math.abs(currentMotionMagnitude - 9.81);
             delta = (Math.random() - 0.5) * 4 - (motionDelta * 2);
 
@@ -82,7 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 modeTransit.className = 'badge inactive';
             }
         } else {
-            // Fallback simulation
+            // Fallback simulation mode
             delta = (Math.random() - 0.48) * 6;
         }
 
@@ -117,11 +110,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 1000);
 
     function drawChart() {
+        if (!canvas) return;
         const width = canvas.width;
         const height = canvas.height;
         ctx.clearRect(0, 0, width, height);
 
-        // Grid Lines (25%, 50%, 75%)
+        // Grid Lines
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
         ctx.lineWidth = 1;
         [0.25, 0.5, 0.75].forEach(ratio => {
@@ -131,7 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.stroke();
         });
 
-        // Adaptive Baseline (Dashed Yellow Line)
+        // Adaptive Baseline
         ctx.beginPath();
         ctx.setLineDash([4, 4]);
         ctx.strokeStyle = '#FFD740';
@@ -158,4 +152,4 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.stroke();
     }
 });
-            
+                          
